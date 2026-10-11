@@ -5,10 +5,10 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 DATA_FILE = "users.json"
 
-# Speichert aktive Sessions: { "username": {"location": "Capital City", "activity": "In Town"} }
+# Active sessions: { "username": {"location": "Capital City", "activity": "In Town"} }
 ACTIVE_SESSIONS = {}
 
-# Nachrichten-Speicher: { "empfaenger": [{"from": "sender", "msg": "Hallo!"}] }
+# Message buffer: { "recipient": [{"from": "sender", "msg": "Hello!"}] }
 CHAT_MESSAGES = {}
 
 
@@ -44,29 +44,29 @@ def login():
             return (
                 jsonify({
                     "success": False,
-                    "message": "Account ist bereits auf einem anderen Gerät eingeloggt!",
+                    "message": "Account is already logged in on another device!",
                 }),
                 401,
             )
 
         p_data = users[username]["player_data"]
         ACTIVE_SESSIONS[username] = {
-            "class": p_data.get("char_class", "Unbekannt"),
+            "class": p_data.get("char_class", "Unknown"),
             "level": p_data.get("level", 1),
             "location": p_data.get("location_name", "Aethelia"),
-            "activity": "Im Hauptmenü",
+            "activity": "In Main Menu",
         }
         return (
             jsonify({
                 "success": True,
-                "message": "Login erfolgreich",
+                "message": "Login successful",
                 "player_data": p_data,
             }),
             200,
         )
 
     return (
-        jsonify({"success": False, "message": "Ungültiger Benutzername oder Passwort."}),
+        jsonify({"success": False, "message": "Invalid username or password."}),
         401,
     )
 
@@ -84,7 +84,7 @@ def logout():
 def update_activity():
     data = request.json
     username = data.get("username")
-    activity = data.get("activity", "Beschäftigt")
+    activity = data.get("activity", "Busy")
     location = data.get("location", "Aethelia")
 
     if username in ACTIVE_SESSIONS:
@@ -109,7 +109,7 @@ def send_message():
         CHAT_MESSAGES[recipient] = []
 
     CHAT_MESSAGES[recipient].append({"from": sender, "msg": message})
-    return jsonify({"success": True, "message": "Nachricht gesendet!"}), 200
+    return jsonify({"success": True, "message": "Message sent!"}), 200
 
 
 @app.route("/get-messages", methods=["POST"])
@@ -117,7 +117,7 @@ def get_messages():
     data = request.json
     username = data.get("username")
     messages = CHAT_MESSAGES.get(username, [])
-    CHAT_MESSAGES[username] = []  # Nach dem Abrufen leeren
+    CHAT_MESSAGES[username] = []  # Clear after reading
     return jsonify({"messages": messages}), 200
 
 
@@ -139,7 +139,7 @@ def register():
 
     if username in users:
         return (
-            jsonify({"success": False, "message": "Benutzername bereits vergeben."}),
+            jsonify({"success": False, "message": "Username is already taken."}),
             400,
         )
 
@@ -147,12 +147,12 @@ def register():
     save_data(users)
 
     ACTIVE_SESSIONS[username] = {
-        "class": player_data.get("char_class", "Unbekannt"),
+        "class": player_data.get("char_class", "Unknown"),
         "level": player_data.get("level", 1),
         "location": player_data.get("location_name", "Aethelia"),
-        "activity": "Neu registriert",
+        "activity": "Newly Registered",
     }
-    return jsonify({"success": True, "message": "Account erstellt!"}), 201
+    return jsonify({"success": True, "message": "Account created!"}), 201
 
 
 @app.route("/save", methods=["POST"])
@@ -173,12 +173,10 @@ def save_progress():
                 "location_name", "Aethelia"
             )
 
-        return jsonify({"success": True, "message": "Gespeichert"}), 200
-    return jsonify({"success": False, "message": "User nicht gefunden"}), 404
+        return jsonify({"success": True, "message": "Saved successfully"}), 200
+    return jsonify({"success": False, "message": "User not found"}), 404
 
 
 if __name__ == "__main__":
-    # Zum Zurücksetzen aller Datenbanken beim ersten Start entkommentieren:
-    # save_data({})
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
