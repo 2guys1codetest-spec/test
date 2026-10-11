@@ -14,7 +14,6 @@ DUELS = {}
 
 
 def cleanup_inactive_sessions():
-    """Entfernt inaktive Spieler nach 10 Sekunden ohne Heartbeat."""
     now = time.time()
     to_delete = [
         user
@@ -51,8 +50,42 @@ def heartbeat():
     cleanup_inactive_sessions()
     data = request.json
     username = data.get("username")
+    coords = data.get("coords", [0, 0])
+    location = data.get("location", "Capital City Aethelia")
+
     if username in ACTIVE_SESSIONS:
         ACTIVE_SESSIONS[username]["last_seen"] = time.time()
+        ACTIVE_SESSIONS[username]["coords"] = coords
+        ACTIVE_SESSIONS[username]["location"] = location
+
+        # Automatische Erkennung für Open-World Duell bei gleicher Koordinate
+        for other_user, sess in ACTIVE_SESSIONS.items():
+            if (
+                other_user != username
+                and sess.get("coords") == coords
+                .get("location_name")
+                == ACTIVE_SESSIONS[username]["location"]
+            ):
+                duel_id = f"{username}_vs_{other_user}"
+                rev_duel_id = f"{other_user}_vs_{username}"
+                if (
+                    duel_id not in DUELS
+                    and rev_duel_id not in DUELS
+                    and sess.get("activity") == "Open World"
+                ):
+                    reward_gold = random.randint(50, 200)
+                    DUELS[duel_id] = {
+                        "challenger": username,
+                        "target": other_user,
+                        "status": "pending",
+                        "turn": username,
+                        "reward_gold": reward_gold,
+                        "hp": {username: 100, other_user: 100},
+                        "max_hp": {username: 100, other_user: 100},
+                        "log": [
+                            f"Encounter! {username} and {other_user} met at coords {coords}!"
+                        ],
+                    }
         return jsonify({"success": True}), 200
     return jsonify({"success": False}), 404
 
@@ -72,6 +105,7 @@ def login():
             "level": p_data.get("level", 1),
             "location": p_data.get("location_name", "Capital City Aethelia"),
             "activity": "In Main Menu",
+            "coords": [0, 0],
             "last_seen": time.time(),
         }
         return (
@@ -84,7 +118,6 @@ def login():
             ),
             200,
         )
-
     return jsonify({"success": False, "message": "Invalid credentials."}), 401
 
 
@@ -94,21 +127,6 @@ def logout():
     username = data.get("username")
     if username in ACTIVE_SESSIONS:
         del ACTIVE_SESSIONS[username]
-    return jsonify({"success": True}), 200
-
-
-@app.route("/update-activity", methods=["POST"])
-def update_activity():
-    cleanup_inactive_sessions()
-    data = request.json
-    username = data.get("username")
-    activity = data.get("activity", "Busy")
-    location = data.get("location", "Capital City Aethelia")
-
-    if username in ACTIVE_SESSIONS:
-        ACTIVE_SESSIONS[username]["activity"] = activity
-        ACTIVE_SESSIONS[username]["location"] = location
-        ACTIVE_SESSIONS[username]["last_seen"] = time.time()
     return jsonify({"success": True}), 200
 
 
@@ -134,30 +152,16 @@ def global_chat_get():
     return jsonify({"messages": GLOBAL_CHAT}), 200
 
 
-# ---------------------------------------------------------------------------
-# REAL-TIME PVP DUEL SYSTEM (SERVER SIDE)
-# ---------------------------------------------------------------------------
-@app.route("/duel-challenge", methods=["POST"])
-def duel_challenge():
-    cleanup_inactive_sessions()
+@app.route("/check-pending-duel", methods=["POST"])
+def check_pending_duel():
     data = request.json
-    challenger = data.get("challenger")
-    target = data.get("target")
-
-    if target not in ACTIVE_SESSIONS:
-        return jsonify({"success": False, "message": "Target is not online."}), 400
-
-    duel_id = f"{challenger}_vs_{target}"
-    DUELS[duel_id] = {
-        "challenger": challenger,
-        "target": target,
-        "status": "pending",
-        "turn": challenger,
-        "hp": {challenger: 100, target: 100},
-        "max_hp": {challenger: 100, target: 100},
-        "log": [f"{challenger} challenged {target} to a duel!"],
-    }
-    return jsonify({"success": True, "duel_id": duel_id}), 200
+    username = data.get("username")
+    for duel_id, duel in DUELS.items():
+        if (
+            duel["target"] == username or duel["challenger"] == username
+        ) and duel["status"] == "pending":
+            return jsonify({"success": True, "duel_id": duel_id, "duel": duel}), 200
+    return jsonify({"success": False}), 200
 
 
 @app.route("/duel-respond", methods=["POST"])
@@ -169,11 +173,11 @@ def duel_respond():
     if duel_id in DUELS:
         if accept:
             DUELS[duel_id]["status"] = "active"
-            DUELS[duel_id]["log"].append("Duel started!")
+            DUELS[duel_id]["log"].append("Both warriors agreed! Duel started!")
         else:
             DUELS[duel_id]["status"] = "declined"
         return jsonify({"success": True}), 200
-    return jsonify({"success": False, "message": "Duel not found."}), 404
+    return jsonify({"success": False}), 404
 
 
 @app.route("/duel-status", methods=["POST"])
@@ -193,32 +197,28 @@ def duel_action():
     action = data.get("action")
 
     if duel_id not in DUELS:
-        return jsonify({"success": False, "message": "Duel not found."}), 404
+        return jsonify({"success": False}), 404
 
     duel = DUELS[duel_id]
-    if duel["status"] != "active":
-        return jsonify({"success": False, "message": "Duel is not active."}), 400
-
-    if duel["turn"] != player:
-        return jsonify({"success": False, "message": "Not your turn."}), 400
+    if duel["status"] != "active" or duel["turn"] != player:
+        return jsonify({"success": False}), 400
 
     opponent = duel["target"] if player == duel["challenger"] else duel["challenger"]
 
     if action == "attack":
-        dmg = random.randint(12, 22)
+        dmg = random.randint(15, 25)
         duel["hp"][opponent] -= dmg
-        duel["log"].append(f"{player} attacked {opponent} for {dmg} damage!")
+        duel["log"].append(f"{player} strikes {opponent} for {dmg} damage!")
     elif action == "heal":
         heal = random.randint(15, 25)
         duel["hp"][player] = min(duel["max_hp"][player], duel["hp"][player] + heal)
-        duel["log"].append(f"{player} healed for {heal} HP!")
+        duel["log"].append(f"{player} recovers {heal} HP!")
 
-    # Prüfen, ob jemand besiegt wurde
     if duel["hp"][opponent] <= 0:
         duel["hp"][opponent] = 0
         duel["status"] = "finished"
         duel["winner"] = player
-        duel["log"].append(f"=== {player} WON THE DUEL! ===")
+        duel["log"].append(f"=== {player} WON THE DUEL & REWARD ({duel['reward_gold']}G)! ===")
     else:
         duel["turn"] = opponent
 
@@ -238,12 +238,12 @@ def register():
 
     users[username] = {"password": password, "player_data": player_data}
     save_data(users)
-
     ACTIVE_SESSIONS[username] = {
         "class": player_data.get("char_class", "Warrior"),
         "level": player_data.get("level", 1),
-        "location": player_data.get("location_name", "Capital City Aethelia"),
+        "location": "Capital City Aethelia",
         "activity": "Newly Registered",
+        "coords": [0, 0],
         "last_seen": time.time(),
     }
     return jsonify({"success": True, "message": "Account created!"}), 201
@@ -257,17 +257,11 @@ def save_progress():
     users = load_data()
 
     if username in users:
-        password = users[username]["password"]
-        users[username] = {"password": password, "player_data": player_data}
+        users[username]["player_data"] = player_data
         save_data(users)
-
         if username in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[username]["level"] = player_data.get("level", 1)
-            ACTIVE_SESSIONS[username]["location"] = player_data.get(
-                "location_name", "Capital City Aethelia"
-            )
             ACTIVE_SESSIONS[username]["last_seen"] = time.time()
-
         return jsonify({"success": True}), 200
     return jsonify({"success": False}), 404
 
