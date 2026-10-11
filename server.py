@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import time
 from flask import Flask, jsonify, request
 
@@ -13,7 +14,7 @@ DUELS = {}
 
 
 def cleanup_inactive_sessions():
-    """Entfernt Spieler, deren Heartbeat seit mehr als 10 Sekunden ausblieb."""
+    """Entfernt inaktive Spieler nach 10 Sekunden ohne Heartbeat."""
     now = time.time()
     to_delete = [
         user
@@ -84,10 +85,7 @@ def login():
             200,
         )
 
-    return (
-        jsonify({"success": False, "message": "Invalid username or password."}),
-        401,
-    )
+    return jsonify({"success": False, "message": "Invalid credentials."}), 401
 
 
 @app.route("/logout", methods=["POST"])
@@ -120,29 +118,6 @@ def online_players():
     return jsonify({"players": ACTIVE_SESSIONS}), 200
 
 
-@app.route("/send-message", methods=["POST"])
-def send_message():
-    data = request.json
-    sender = data.get("sender")
-    recipient = data.get("recipient")
-    message = data.get("message")
-
-    if recipient not in CHAT_MESSAGES:
-        CHAT_MESSAGES[recipient] = []
-
-    CHAT_MESSAGES[recipient].append({"from": sender, "msg": message})
-    return jsonify({"success": True}), 200
-
-
-@app.route("/get-messages", methods=["POST"])
-def get_messages():
-    data = request.json
-    username = data.get("username")
-    messages = CHAT_MESSAGES.get(username, [])
-    CHAT_MESSAGES[username] = []
-    return jsonify({"messages": messages}), 200
-
-
 @app.route("/global-chat-send", methods=["POST"])
 def global_chat_send():
     data = request.json
@@ -159,25 +134,46 @@ def global_chat_get():
     return jsonify({"messages": GLOBAL_CHAT}), 200
 
 
+# ---------------------------------------------------------------------------
+# REAL-TIME PVP DUEL SYSTEM (SERVER SIDE)
+# ---------------------------------------------------------------------------
 @app.route("/duel-challenge", methods=["POST"])
 def duel_challenge():
+    cleanup_inactive_sessions()
     data = request.json
     challenger = data.get("challenger")
     target = data.get("target")
 
     if target not in ACTIVE_SESSIONS:
-        return (
-            jsonify({"success": False, "message": "Player is not online."}),
-            400,
-        )
+        return jsonify({"success": False, "message": "Target is not online."}), 400
 
     duel_id = f"{challenger}_vs_{target}"
     DUELS[duel_id] = {
         "challenger": challenger,
         "target": target,
         "status": "pending",
+        "turn": challenger,
+        "hp": {challenger: 100, target: 100},
+        "max_hp": {challenger: 100, target: 100},
+        "log": [f"{challenger} challenged {target} to a duel!"],
     }
     return jsonify({"success": True, "duel_id": duel_id}), 200
+
+
+@app.route("/duel-respond", methods=["POST"])
+def duel_respond():
+    data = request.json
+    duel_id = data.get("duel_id")
+    accept = data.get("accept")
+
+    if duel_id in DUELS:
+        if accept:
+            DUELS[duel_id]["status"] = "active"
+            DUELS[duel_id]["log"].append("Duel started!")
+        else:
+            DUELS[duel_id]["status"] = "declined"
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False, "message": "Duel not found."}), 404
 
 
 @app.route("/duel-status", methods=["POST"])
@@ -189,6 +185,46 @@ def duel_status():
     return jsonify({"success": False}), 404
 
 
+@app.route("/duel-action", methods=["POST"])
+def duel_action():
+    data = request.json
+    duel_id = data.get("duel_id")
+    player = data.get("player")
+    action = data.get("action")
+
+    if duel_id not in DUELS:
+        return jsonify({"success": False, "message": "Duel not found."}), 404
+
+    duel = DUELS[duel_id]
+    if duel["status"] != "active":
+        return jsonify({"success": False, "message": "Duel is not active."}), 400
+
+    if duel["turn"] != player:
+        return jsonify({"success": False, "message": "Not your turn."}), 400
+
+    opponent = duel["target"] if player == duel["challenger"] else duel["challenger"]
+
+    if action == "attack":
+        dmg = random.randint(12, 22)
+        duel["hp"][opponent] -= dmg
+        duel["log"].append(f"{player} attacked {opponent} for {dmg} damage!")
+    elif action == "heal":
+        heal = random.randint(15, 25)
+        duel["hp"][player] = min(duel["max_hp"][player], duel["hp"][player] + heal)
+        duel["log"].append(f"{player} healed for {heal} HP!")
+
+    # Prüfen, ob jemand besiegt wurde
+    if duel["hp"][opponent] <= 0:
+        duel["hp"][opponent] = 0
+        duel["status"] = "finished"
+        duel["winner"] = player
+        duel["log"].append(f"=== {player} WON THE DUEL! ===")
+    else:
+        duel["turn"] = opponent
+
+    return jsonify({"success": True, "duel": duel}), 200
+
+
 @app.route("/register", methods=["POST"])
 def register():
     data = request.json
@@ -198,12 +234,7 @@ def register():
     users = load_data()
 
     if username in users:
-        return (
-            jsonify(
-                {"success": False, "message": "Username is already taken."}
-            ),
-            400,
-        )
+        return jsonify({"success": False, "message": "Username taken."}), 400
 
     users[username] = {"password": password, "player_data": player_data}
     save_data(users)
