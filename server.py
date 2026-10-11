@@ -1,13 +1,15 @@
 import json
 import os
+import random
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 DATA_FILE = "users.json"
 
 ACTIVE_SESSIONS = {}
-CHAT_MESSAGES = {}  # Direct Messages
-GLOBAL_CHAT = []  # Public City Chat
+CHAT_MESSAGES = {}
+GLOBAL_CHAT = []
+DUELS = {}
 
 
 def load_data():
@@ -40,10 +42,9 @@ def login():
     if username in users and users[username]["password"] == password:
         if username in ACTIVE_SESSIONS:
             return (
-                jsonify({
-                    "success": False,
-                    "message": "Account is already logged in on another device!",
-                }),
+                jsonify(
+                    {"success": False, "message": "Soul is already bound to another realm!"}
+                ),
                 401,
             )
 
@@ -51,22 +52,15 @@ def login():
         ACTIVE_SESSIONS[username] = {
             "class": p_data.get("char_class", "Unknown"),
             "level": p_data.get("level", 1),
-            "location": p_data.get("location_name", "Aethelia"),
-            "activity": "In Main Menu",
+            "location": p_data.get("location_name", "Tristram Ruins"),
+            "activity": "Lurking in Darkness",
         }
         return (
-            jsonify({
-                "success": True,
-                "message": "Login successful",
-                "player_data": p_data,
-            }),
+            jsonify({"success": True, "message": "Login successful", "player_data": p_data}),
             200,
         )
 
-    return (
-        jsonify({"success": False, "message": "Invalid username or password."}),
-        401,
-    )
+    return jsonify({"success": False, "message": "Invalid soul credentials."}), 401
 
 
 @app.route("/logout", methods=["POST"])
@@ -82,8 +76,8 @@ def logout():
 def update_activity():
     data = request.json
     username = data.get("username")
-    activity = data.get("activity", "Busy")
-    location = data.get("location", "Aethelia")
+    activity = data.get("activity", "Wandering")
+    location = data.get("location", "Tristram Ruins")
 
     if username in ACTIVE_SESSIONS:
         ACTIVE_SESSIONS[username]["activity"] = activity
@@ -125,7 +119,7 @@ def global_chat_send():
     sender = data.get("sender")
     message = data.get("message")
     GLOBAL_CHAT.append({"from": sender, "msg": message})
-    if len(GLOBAL_CHAT) > 30:  # Keep last 30 messages
+    if len(GLOBAL_CHAT) > 30:
         GLOBAL_CHAT.pop(0)
     return jsonify({"success": True}), 200
 
@@ -133,6 +127,53 @@ def global_chat_send():
 @app.route("/global-chat-get", methods=["GET"])
 def global_chat_get():
     return jsonify({"messages": GLOBAL_CHAT}), 200
+
+
+@app.route("/duel-challenge", methods=["POST"])
+def duel_challenge():
+    data = request.json
+    challenger = data.get("challenger")
+    target = data.get("target")
+
+    if target not in ACTIVE_SESSIONS:
+        return jsonify({"success": False, "message": "Wanderer is not present."}), 400
+
+    duel_id = f"{challenger}_vs_{target}"
+    DUELS[duel_id] = {
+        "challenger": challenger,
+        "target": target,
+        "status": "pending",
+        "log": [],
+    }
+
+    if target not in CHAT_MESSAGES:
+        CHAT_MESSAGES[target] = []
+    CHAT_MESSAGES[target].append(
+        {"from": "SYSTEM", "msg": f"DUEL_CHALLENGE:{challenger}:{duel_id}"}
+    )
+
+    return jsonify({"success": True, "duel_id": duel_id}), 200
+
+
+@app.route("/duel-respond", methods=["POST"])
+def duel_respond():
+    data = request.json
+    duel_id = data.get("duel_id")
+    accept = data.get("accept")
+
+    if duel_id in DUELS:
+        DUELS[duel_id]["status"] = "accepted" if accept else "declined"
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False, "message": "Trial not found"}), 404
+
+
+@app.route("/duel-status", methods=["POST"])
+def duel_status():
+    data = request.json
+    duel_id = data.get("duel_id")
+    if duel_id in DUELS:
+        return jsonify({"success": True, "duel": DUELS[duel_id]}), 200
+    return jsonify({"success": False}), 404
 
 
 @app.route("/friend-status", methods=["POST"])
@@ -152,10 +193,7 @@ def register():
     users = load_data()
 
     if username in users:
-        return (
-            jsonify({"success": False, "message": "Username is already taken."}),
-            400,
-        )
+        return jsonify({"success": False, "message": "Soul name already bound."}), 400
 
     users[username] = {"password": password, "player_data": player_data}
     save_data(users)
@@ -163,10 +201,10 @@ def register():
     ACTIVE_SESSIONS[username] = {
         "class": player_data.get("char_class", "Unknown"),
         "level": player_data.get("level", 1),
-        "location": player_data.get("location_name", "Aethelia"),
-        "activity": "Newly Registered",
+        "location": player_data.get("location_name", "Tristram Ruins"),
+        "activity": "Newly Awakened",
     }
-    return jsonify({"success": True, "message": "Account created!"}), 201
+    return jsonify({"success": True, "message": "Soul registered!"}), 201
 
 
 @app.route("/save", methods=["POST"])
@@ -184,7 +222,7 @@ def save_progress():
         if username in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[username]["level"] = player_data.get("level", 1)
             ACTIVE_SESSIONS[username]["location"] = player_data.get(
-                "location_name", "Aethelia"
+                "location_name", "Tristram Ruins"
             )
 
         return jsonify({"success": True}), 200
