@@ -4,6 +4,7 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 DATA_FILE = "users.json"
+ACTIVE_SESSIONS = set()  # Hält fest, wer gerade eingeloggt ist
 
 
 def load_data():
@@ -21,6 +22,11 @@ def save_data(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
+@app.route("/ping", methods=["GET"])
+def ping():
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
@@ -29,6 +35,17 @@ def login():
     users = load_data()
 
     if username in users and users[username]["password"] == password:
+        # Prüfen, ob der Account schon von jemand anderem bespielt wird
+        if username in ACTIVE_SESSIONS:
+            return (
+                jsonify({
+                    "success": False,
+                    "message": "Account ist bereits auf einem anderen Gerät eingeloggt!",
+                }),
+                401,
+            )
+
+        ACTIVE_SESSIONS.add(username)
         return (
             jsonify({
                 "success": True,
@@ -37,7 +54,27 @@ def login():
             }),
             200,
         )
-    return jsonify({"success": False, "message": "Ungültiger Benutzername oder Passwort."}), 401
+    return (
+        jsonify({"success": False, "message": "Ungültiger Benutzername oder Passwort."}),
+        401,
+    )
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    data = request.json
+    username = data.get("username")
+    if username in ACTIVE_SESSIONS:
+        ACTIVE_SESSIONS.remove(username)
+    return jsonify({"success": True}), 200
+
+
+@app.route("/friend-status", methods=["POST"])
+def friend_status():
+    data = request.json
+    username = data.get("username")
+    is_online = username in ACTIVE_SESSIONS
+    return jsonify({"online": is_online}), 200
 
 
 @app.route("/register", methods=["POST"])
@@ -49,10 +86,14 @@ def register():
     users = load_data()
 
     if username in users:
-        return jsonify({"success": False, "message": "Benutzername bereits vergeben."}), 400
+        return (
+            jsonify({"success": False, "message": "Benutzername bereits vergeben."}),
+            400,
+        )
 
     users[username] = {"password": password, "player_data": player_data}
     save_data(users)
+    ACTIVE_SESSIONS.add(username)
     return jsonify({"success": True, "message": "Account erstellt!"}), 201
 
 
