@@ -6,7 +6,6 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 DATA_FILE = "users.json"
 
-# ACTIVE_SESSIONS: { "username": {"class": ..., "level": ..., "location": ..., "activity": ..., "last_seen": timestamp} }
 ACTIVE_SESSIONS = {}
 CHAT_MESSAGES = {}
 GLOBAL_CHAT = []
@@ -14,12 +13,12 @@ DUELS = {}
 
 
 def cleanup_inactive_sessions():
-    """Entfernt inaktive Spieler nach 30 Sekunden Inaktivität."""
+    """Entfernt Spieler, deren Heartbeat seit mehr als 10 Sekunden ausblieb."""
     now = time.time()
     to_delete = [
         user
         for user, data in ACTIVE_SESSIONS.items()
-        if now - data.get("last_seen", 0) > 30
+        if now - data.get("last_seen", 0) > 10
     ]
     for user in to_delete:
         del ACTIVE_SESSIONS[user]
@@ -44,6 +43,17 @@ def save_data(data):
 def ping():
     cleanup_inactive_sessions()
     return jsonify({"status": "ok"}), 200
+
+
+@app.route("/heartbeat", methods=["POST"])
+def heartbeat():
+    cleanup_inactive_sessions()
+    data = request.json
+    username = data.get("username")
+    if username in ACTIVE_SESSIONS:
+        ACTIVE_SESSIONS[username]["last_seen"] = time.time()
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False}), 404
 
 
 @app.route("/login", methods=["POST"])
