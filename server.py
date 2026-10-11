@@ -5,11 +5,9 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 DATA_FILE = "users.json"
 
-# Active sessions: { "username": {"location": "Capital City", "activity": "In Town"} }
 ACTIVE_SESSIONS = {}
-
-# Message buffer: { "recipient": [{"from": "sender", "msg": "Hello!"}] }
-CHAT_MESSAGES = {}
+CHAT_MESSAGES = {}  # Direct Messages
+GLOBAL_CHAT = []  # Public City Chat
 
 
 def load_data():
@@ -109,7 +107,7 @@ def send_message():
         CHAT_MESSAGES[recipient] = []
 
     CHAT_MESSAGES[recipient].append({"from": sender, "msg": message})
-    return jsonify({"success": True, "message": "Message sent!"}), 200
+    return jsonify({"success": True}), 200
 
 
 @app.route("/get-messages", methods=["POST"])
@@ -117,8 +115,24 @@ def get_messages():
     data = request.json
     username = data.get("username")
     messages = CHAT_MESSAGES.get(username, [])
-    CHAT_MESSAGES[username] = []  # Clear after reading
+    CHAT_MESSAGES[username] = []
     return jsonify({"messages": messages}), 200
+
+
+@app.route("/global-chat-send", methods=["POST"])
+def global_chat_send():
+    data = request.json
+    sender = data.get("sender")
+    message = data.get("message")
+    GLOBAL_CHAT.append({"from": sender, "msg": message})
+    if len(GLOBAL_CHAT) > 30:  # Keep last 30 messages
+        GLOBAL_CHAT.pop(0)
+    return jsonify({"success": True}), 200
+
+
+@app.route("/global-chat-get", methods=["GET"])
+def global_chat_get():
+    return jsonify({"messages": GLOBAL_CHAT}), 200
 
 
 @app.route("/friend-status", methods=["POST"])
@@ -173,8 +187,8 @@ def save_progress():
                 "location_name", "Aethelia"
             )
 
-        return jsonify({"success": True, "message": "Saved successfully"}), 200
-    return jsonify({"success": False, "message": "User not found"}), 404
+        return jsonify({"success": True}), 200
+    return jsonify({"success": False}), 404
 
 
 if __name__ == "__main__":
