@@ -43,20 +43,22 @@ def login():
         if username in ACTIVE_SESSIONS:
             return (
                 jsonify(
-                    {"success": False, "message": "Soul is already bound to another realm!"}
+                    {"success": False, "message": "Soul is already bound in active session!"}
                 ),
                 401,
             )
 
         p_data = users[username]["player_data"]
         ACTIVE_SESSIONS[username] = {
-            "class": p_data.get("char_class", "Unknown"),
+            "class": p_data.get("char_class", "Wanderer"),
             "level": p_data.get("level", 1),
-            "location": p_data.get("location_name", "Tristram Ruins"),
-            "activity": "Lurking in Darkness",
+            "location": p_data.get("location_name", "Sanctuary Haven"),
+            "activity": "Lurking in Shadows",
         }
         return (
-            jsonify({"success": True, "message": "Login successful", "player_data": p_data}),
+            jsonify(
+                {"success": True, "message": "Welcome to Darkness", "player_data": p_data}
+            ),
             200,
         )
 
@@ -77,7 +79,7 @@ def update_activity():
     data = request.json
     username = data.get("username")
     activity = data.get("activity", "Wandering")
-    location = data.get("location", "Tristram Ruins")
+    location = data.get("location", "Sanctuary Haven")
 
     if username in ACTIVE_SESSIONS:
         ACTIVE_SESSIONS[username]["activity"] = activity
@@ -136,20 +138,20 @@ def duel_challenge():
     target = data.get("target")
 
     if target not in ACTIVE_SESSIONS:
-        return jsonify({"success": False, "message": "Wanderer is not present."}), 400
+        return jsonify({"success": False, "message": "Target soul is absent."}), 400
 
     duel_id = f"{challenger}_vs_{target}"
     DUELS[duel_id] = {
         "challenger": challenger,
         "target": target,
         "status": "pending",
-        "log": [],
+        "log": [f"{challenger} demands blood from {target}!"],
     }
 
     if target not in CHAT_MESSAGES:
         CHAT_MESSAGES[target] = []
     CHAT_MESSAGES[target].append(
-        {"from": "SYSTEM", "msg": f"DUEL_CHALLENGE:{challenger}:{duel_id}"}
+        {"from": "BLOOD_RITUAL", "msg": f"DUEL_CHALLENGE:{challenger}:{duel_id}"}
     )
 
     return jsonify({"success": True, "duel_id": duel_id}), 200
@@ -164,7 +166,7 @@ def duel_respond():
     if duel_id in DUELS:
         DUELS[duel_id]["status"] = "accepted" if accept else "declined"
         return jsonify({"success": True}), 200
-    return jsonify({"success": False, "message": "Trial not found"}), 404
+    return jsonify({"success": False, "message": "Ritual not found"}), 404
 
 
 @app.route("/duel-status", methods=["POST"])
@@ -193,18 +195,21 @@ def register():
     users = load_data()
 
     if username in users:
-        return jsonify({"success": False, "message": "Soul name already bound."}), 400
+        return (
+            jsonify({"success": False, "message": "Name already claimed by another wanderer."}),
+            400,
+        )
 
     users[username] = {"password": password, "player_data": player_data}
     save_data(users)
 
     ACTIVE_SESSIONS[username] = {
-        "class": player_data.get("char_class", "Unknown"),
+        "class": player_data.get("char_class", "Wanderer"),
         "level": player_data.get("level", 1),
-        "location": player_data.get("location_name", "Tristram Ruins"),
+        "location": player_data.get("location_name", "Sanctuary Haven"),
         "activity": "Newly Awakened",
     }
-    return jsonify({"success": True, "message": "Soul registered!"}), 201
+    return jsonify({"success": True, "message": "Soul registered."}), 201
 
 
 @app.route("/save", methods=["POST"])
@@ -222,7 +227,7 @@ def save_progress():
         if username in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[username]["level"] = player_data.get("level", 1)
             ACTIVE_SESSIONS[username]["location"] = player_data.get(
-                "location_name", "Tristram Ruins"
+                "location_name", "Sanctuary Haven"
             )
 
         return jsonify({"success": True}), 200
