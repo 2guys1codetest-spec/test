@@ -1,15 +1,28 @@
 import json
 import os
-import random
+import time
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 DATA_FILE = "users.json"
 
+# ACTIVE_SESSIONS: { "username": {"class": ..., "level": ..., "location": ..., "activity": ..., "last_seen": timestamp} }
 ACTIVE_SESSIONS = {}
 CHAT_MESSAGES = {}
 GLOBAL_CHAT = []
 DUELS = {}
+
+
+def cleanup_inactive_sessions():
+    """Entfernt inaktive Spieler nach 30 Sekunden Inaktivität."""
+    now = time.time()
+    to_delete = [
+        user
+        for user, data in ACTIVE_SESSIONS.items()
+        if now - data.get("last_seen", 0) > 30
+    ]
+    for user in to_delete:
+        del ACTIVE_SESSIONS[user]
 
 
 def load_data():
@@ -29,40 +42,42 @@ def save_data(data):
 
 @app.route("/ping", methods=["GET"])
 def ping():
+    cleanup_inactive_sessions()
     return jsonify({"status": "ok"}), 200
 
 
 @app.route("/login", methods=["POST"])
 def login():
+    cleanup_inactive_sessions()
     data = request.json
     username = data.get("username")
     password = data.get("password")
     users = load_data()
 
     if username in users and users[username]["password"] == password:
-        if username in ACTIVE_SESSIONS:
-            return (
-                jsonify(
-                    {"success": False, "message": "Soul is already bound in active session!"}
-                ),
-                401,
-            )
-
         p_data = users[username]["player_data"]
         ACTIVE_SESSIONS[username] = {
-            "class": p_data.get("char_class", "Wanderer"),
+            "class": p_data.get("char_class", "Warrior"),
             "level": p_data.get("level", 1),
-            "location": p_data.get("location_name", "Sanctuary Haven"),
-            "activity": "Lurking in Shadows",
+            "location": p_data.get("location_name", "Capital City Aethelia"),
+            "activity": "In Main Menu",
+            "last_seen": time.time(),
         }
         return (
             jsonify(
-                {"success": True, "message": "Welcome to Darkness", "player_data": p_data}
+                {
+                    "success": True,
+                    "message": "Login successful",
+                    "player_data": p_data,
+                }
             ),
             200,
         )
 
-    return jsonify({"success": False, "message": "Invalid soul credentials."}), 401
+    return (
+        jsonify({"success": False, "message": "Invalid username or password."}),
+        401,
+    )
 
 
 @app.route("/logout", methods=["POST"])
@@ -76,19 +91,22 @@ def logout():
 
 @app.route("/update-activity", methods=["POST"])
 def update_activity():
+    cleanup_inactive_sessions()
     data = request.json
     username = data.get("username")
-    activity = data.get("activity", "Wandering")
-    location = data.get("location", "Sanctuary Haven")
+    activity = data.get("activity", "Busy")
+    location = data.get("location", "Capital City Aethelia")
 
     if username in ACTIVE_SESSIONS:
         ACTIVE_SESSIONS[username]["activity"] = activity
         ACTIVE_SESSIONS[username]["location"] = location
+        ACTIVE_SESSIONS[username]["last_seen"] = time.time()
     return jsonify({"success": True}), 200
 
 
 @app.route("/online-players", methods=["GET"])
 def online_players():
+    cleanup_inactive_sessions()
     return jsonify({"players": ACTIVE_SESSIONS}), 200
 
 
@@ -138,35 +156,18 @@ def duel_challenge():
     target = data.get("target")
 
     if target not in ACTIVE_SESSIONS:
-        return jsonify({"success": False, "message": "Target soul is absent."}), 400
+        return (
+            jsonify({"success": False, "message": "Player is not online."}),
+            400,
+        )
 
     duel_id = f"{challenger}_vs_{target}"
     DUELS[duel_id] = {
         "challenger": challenger,
         "target": target,
         "status": "pending",
-        "log": [f"{challenger} demands blood from {target}!"],
     }
-
-    if target not in CHAT_MESSAGES:
-        CHAT_MESSAGES[target] = []
-    CHAT_MESSAGES[target].append(
-        {"from": "BLOOD_RITUAL", "msg": f"DUEL_CHALLENGE:{challenger}:{duel_id}"}
-    )
-
     return jsonify({"success": True, "duel_id": duel_id}), 200
-
-
-@app.route("/duel-respond", methods=["POST"])
-def duel_respond():
-    data = request.json
-    duel_id = data.get("duel_id")
-    accept = data.get("accept")
-
-    if duel_id in DUELS:
-        DUELS[duel_id]["status"] = "accepted" if accept else "declined"
-        return jsonify({"success": True}), 200
-    return jsonify({"success": False, "message": "Ritual not found"}), 404
 
 
 @app.route("/duel-status", methods=["POST"])
@@ -176,14 +177,6 @@ def duel_status():
     if duel_id in DUELS:
         return jsonify({"success": True, "duel": DUELS[duel_id]}), 200
     return jsonify({"success": False}), 404
-
-
-@app.route("/friend-status", methods=["POST"])
-def friend_status():
-    data = request.json
-    username = data.get("username")
-    is_online = username in ACTIVE_SESSIONS
-    return jsonify({"online": is_online}), 200
 
 
 @app.route("/register", methods=["POST"])
@@ -196,7 +189,9 @@ def register():
 
     if username in users:
         return (
-            jsonify({"success": False, "message": "Name already claimed by another wanderer."}),
+            jsonify(
+                {"success": False, "message": "Username is already taken."}
+            ),
             400,
         )
 
@@ -204,12 +199,13 @@ def register():
     save_data(users)
 
     ACTIVE_SESSIONS[username] = {
-        "class": player_data.get("char_class", "Wanderer"),
+        "class": player_data.get("char_class", "Warrior"),
         "level": player_data.get("level", 1),
-        "location": player_data.get("location_name", "Sanctuary Haven"),
-        "activity": "Newly Awakened",
+        "location": player_data.get("location_name", "Capital City Aethelia"),
+        "activity": "Newly Registered",
+        "last_seen": time.time(),
     }
-    return jsonify({"success": True, "message": "Soul registered."}), 201
+    return jsonify({"success": True, "message": "Account created!"}), 201
 
 
 @app.route("/save", methods=["POST"])
@@ -227,8 +223,9 @@ def save_progress():
         if username in ACTIVE_SESSIONS:
             ACTIVE_SESSIONS[username]["level"] = player_data.get("level", 1)
             ACTIVE_SESSIONS[username]["location"] = player_data.get(
-                "location_name", "Sanctuary Haven"
+                "location_name", "Capital City Aethelia"
             )
+            ACTIVE_SESSIONS[username]["last_seen"] = time.time()
 
         return jsonify({"success": True}), 200
     return jsonify({"success": False}), 404
